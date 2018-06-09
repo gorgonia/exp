@@ -5,8 +5,8 @@ import (
 	"math"
 	"math/rand"
 
-	"gorgonia.org/gorgonia"
-	"gorgonia.org/tensor"
+	G "gorgonia.org/gorgonia"
+	T "gorgonia.org/tensor"
 )
 
 //Data x
@@ -23,12 +23,12 @@ type particle struct {
 	bestLocalPositions []float64
 }
 
-func newParticle(feats, hiddenSize, outputs int) *particle {
-	n := newNN(feats, hiddenSize)
+func newParticle(feats, hiddenSize, outputs, bucketSize int) *particle {
+	n := newNN(feats, hiddenSize, bucketSize)
 
-	var lossVal, predVal gorgonia.Value
-	gorgonia.Read(n.pred, &predVal) // read the predicted value out into something that can be accessed by Go
-	gorgonia.Read(n.loss, &lossVal) // read the loss value out into something that can be accessed by Go
+	var lossVal, predVal G.Value
+	G.Read(n.pred, &predVal) // read the predicted value out into something that can be accessed by Go
+	G.Read(n.loss, &lossVal) // read the loss value out into something that can be accessed by Go
 
 	p := particle{
 		feats:         feats,
@@ -57,20 +57,21 @@ func (p *particle) Train(trainingData []Data, iterations int) {
 			Ys[i*ySize+j] = y
 		}
 	}
-	// training
-	yVal := tensor.New(tensor.WithShape(trainingDataSize), tensor.WithBacking(Ys))          // make Ys into a Tensor. No additional allocations
-	xVal := tensor.New(tensor.WithShape(trainingDataSize, p.feats), tensor.WithBacking(Xs)) // make Xs into a Tensor. No additional allocations are made.
 
-	gorgonia.Let(n.x, xVal)
-	gorgonia.Let(n.y, yVal)
-	m := gorgonia.NewTapeMachine(n.g)
+	// training
+	yVal := T.New(T.WithShape(trainingDataSize), T.WithBacking(Ys))          // make Ys into a Tensor. No additional allocations
+	xVal := T.New(T.WithShape(trainingDataSize, p.feats), T.WithBacking(Xs)) // make Xs into a Tensor. No additional allocations are made.
+
+	G.Let(n.x, xVal)
+	G.Let(n.y, yVal)
+	m := G.NewTapeMachine(n.g)
 
 	for i := 0; i < iterations; i++ {
 		currentPositions := n.exportPositions()
 		revisedPositions := make([]float64, len(currentPositions)) //just for debugging I'm not overriding the currentPosition slice
 
 		rowCount := len(trainingData)
-		xTestVal := tensor.New(tensor.WithShape(rowCount, p.feats), tensor.WithBacking(tensor.Random(tensor.Float64, rowCount*p.feats)))
+		xTestVal := T.New(T.WithShape(rowCount, p.feats), T.WithBacking(T.Random(T.Float64, rowCount*p.feats)))
 		if err := n.fwd(m, xTestVal); err != nil {
 			log.Fatal(err)
 		}
@@ -117,10 +118,10 @@ func (p *particle) Train(trainingData []Data, iterations int) {
 }
 
 func (p *particle) Predict(inputs ...float64) []float64 {
-	xTestVal := tensor.New(tensor.WithShape(1, p.feats), tensor.WithBacking(tensor.Random(tensor.Float64, len(inputs))))
-	gorgonia.Let(p.n.x, xTestVal)
+	xTestVal := T.New(T.WithShape(1, p.feats), T.WithBacking(T.Random(T.Float64, len(inputs))))
+	G.Let(p.n.x, xTestVal)
 
-	m := gorgonia.NewTapeMachine(p.n.g)
+	m := G.NewTapeMachine(p.n.g)
 	if err := p.n.fwd(m, xTestVal); err != nil {
 		log.Fatal(err)
 	}

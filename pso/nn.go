@@ -1,43 +1,41 @@
 package pso
 
 import (
-	"gorgonia.org/gorgonia"
+	G "gorgonia.org/gorgonia"
 )
 
-var must = gorgonia.Must
+var must = G.Must
 
 type layer struct {
-	w, b *gorgonia.Node
+	w, b *G.Node
 }
 
 type nn struct {
-	g                *gorgonia.ExprGraph
-	x, y             *gorgonia.Node
-	w, b, w2, b2     *gorgonia.Node
+	g                *G.ExprGraph
+	x, y             *G.Node
+	w, b, w2, b2     *G.Node
 	layers           []layer // something like this. Then the newNN() func simply has to change a bit, that's all.
-	pred, loss, last *gorgonia.Node
+	pred, loss, last *G.Node
 }
 
-func newNN(feats, hiddenSize int) *nn {
-	examplesN := 4 // dummy value, can be changed
+func newNN(feats, hiddenSize, bucketSize int) *nn {
+	g := G.NewGraph()
+	y := G.NewVector(g, G.Float64, G.WithShape(bucketSize), G.WithName("Y"))
+	x := G.NewMatrix(g, G.Float64, G.WithShape(bucketSize, feats), G.WithName("X"))
+	w := G.NewMatrix(g, G.Float64, G.WithShape(feats, hiddenSize), G.WithName("W"), G.WithInit(G.GlorotU(1)))
+	b := G.NewMatrix(g, G.Float64, G.WithShape(bucketSize, hiddenSize), G.WithName("b"), G.WithInit(G.Zeroes()))
 
-	g := gorgonia.NewGraph()
-	y := gorgonia.NewVector(g, gorgonia.Float64, gorgonia.WithShape(examplesN), gorgonia.WithName("Y"))
-	x := gorgonia.NewMatrix(g, gorgonia.Float64, gorgonia.WithShape(examplesN, feats), gorgonia.WithName("X"))
-	w := gorgonia.NewMatrix(g, gorgonia.Float64, gorgonia.WithShape(feats, hiddenSize), gorgonia.WithName("W"), gorgonia.WithInit(gorgonia.GlorotU(1)))
-	b := gorgonia.NewMatrix(g, gorgonia.Float64, gorgonia.WithShape(examplesN, hiddenSize), gorgonia.WithName("b"), gorgonia.WithInit(gorgonia.Zeroes()))
+	l0 := must(G.Add(must(G.Mul(x, w)), b))
+	l0 = must(G.Tanh(l0))
 
-	l0 := must(gorgonia.Add(must(gorgonia.Mul(x, w)), b))
-	l0 = must(gorgonia.Tanh(l0))
+	w2 := G.NewVector(g, G.Float64, G.WithShape(hiddenSize), G.WithName("W2"), G.WithInit(G.GlorotU(1)))
+	b2 := G.NewVector(g, G.Float64, G.WithShape(bucketSize), G.WithName("b2"), G.WithInit(G.Zeroes()))
 
-	w2 := gorgonia.NewVector(g, gorgonia.Float64, gorgonia.WithShape(hiddenSize), gorgonia.WithName("W2"), gorgonia.WithInit(gorgonia.GlorotU(1)))
-	b2 := gorgonia.NewVector(g, gorgonia.Float64, gorgonia.WithShape(examplesN), gorgonia.WithName("b2"), gorgonia.WithInit(gorgonia.Zeroes()))
+	last := must(G.Add(must(G.Mul(l0, w2)), b2))
+	last = must(G.Tanh(last))
 
-	last := must(gorgonia.Add(must(gorgonia.Mul(l0, w2)), b2))
-	last = must(gorgonia.Tanh(last))
-
-	loss := must(gorgonia.Square(must(gorgonia.Sub(y, last))))
-	loss = must(gorgonia.Sum(loss))
+	loss := must(G.Square(must(G.Sub(y, last))))
+	loss = must(G.Sum(loss))
 
 	n := &nn{
 		g:    g,
@@ -59,27 +57,27 @@ func newNN(feats, hiddenSize int) *nn {
 	return n
 }
 
-func (n *nn) fwd(m gorgonia.VM, x gorgonia.Value) error {
+func (n *nn) fwd(m G.VM, x G.Value) error {
 	// change the metadata of x first. This may cause panics. They're usually for good reasons.
 	// if not, file a issue.
-	gorgonia.WithShape(x.Shape().Clone()...)(n.x)
+	G.WithShape(x.Shape().Clone()...)(n.x)
 
 	// set the value of x
-	if err := gorgonia.Let(n.x, x); err != nil {
+	if err := G.Let(n.x, x); err != nil {
 		return nil
 	}
 
 	return m.RunAll()
 }
 
-func (n *nn) train(x, y gorgonia.Value) error {
+func (n *nn) train(x, y G.Value) error {
 	// update x and y shapes
-	gorgonia.WithShape(x.Shape().Clone()...)(n.x)
-	gorgonia.WithShape(y.Shape().Clone()...)(n.y)
+	G.WithShape(x.Shape().Clone()...)(n.x)
+	G.WithShape(y.Shape().Clone()...)(n.y)
 
-	gorgonia.Let(n.x, x)
-	gorgonia.Let(n.y, y)
-	m := gorgonia.NewTapeMachine(n.g)
+	G.Let(n.x, x)
+	G.Let(n.y, y)
+	m := G.NewTapeMachine(n.g)
 	if err := m.RunAll(); err != nil {
 		return err
 	}
@@ -116,4 +114,4 @@ func (n *nn) importPositions(positions []float64) {
 	}
 }
 
-type errorProp func(loss *gorgonia.Node, wrt ...*gorgonia.Node) (gorgonia.Nodes, error)
+type errorProp func(loss *G.Node, wrt ...*G.Node) (G.Nodes, error)
